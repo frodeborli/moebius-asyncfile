@@ -1,0 +1,25 @@
+{
+    "name": "moebius/async-file",
+    "description": "Transparent context switching for moebius coroutines on file system access.",
+    "type": "library",
+    "require-dev": {
+        "charm/testing": "dev-master"
+    },
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "Moebius\\AsyncFile\\": "src/"
+        },
+        "files": ["functions.php"]
+    },
+    "authors": [
+        {
+            "name": "Frode Børli",
+            "email": "frode@ennerd.com"
+        }
+    ],
+    "minimum-stability": "dev",
+    "require": {
+        "moebius/coroutine": "dev-master"
+    }
+}
