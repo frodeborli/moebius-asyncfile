@@ -18,7 +18,8 @@
             "email": "frode@ennerd.com"
         }
     ],
-    "minimum-stability": "dev",
+    "minimum-stability": "RC",
+    "prefer-stable": true,
     "require": {
         "moebius/coroutine": "dev-master"
     }
