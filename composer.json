@@ -21,6 +21,6 @@
     "minimum-stability": "RC",
     "prefer-stable": true,
     "require": {
-        "moebius/coroutine": "dev-master"
+        "moebius/coroutine": ">=1.0"
     }
 }
