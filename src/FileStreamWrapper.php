@@ -1,14 +1,16 @@
 <?php
 namespace Moebius\AsyncFile;
 
+use Moebius\Coroutine as Co;
 use Moebius\Coroutine\Unblocker;
-use function M\{suspend, readable, writable};
 
 class FileStreamWrapper extends Unblocker {
 
     const PROTOCOL = 'file';
 
     protected static bool $registered = false;
+    protected static ?int $lastErrorCode = null;
+    protected static ?string $lastErrorMessage = null;
 
     public static function register(int $flags): void {
         if (self::$registered) {
@@ -26,59 +28,80 @@ class FileStreamWrapper extends Unblocker {
         stream_wrapper_restore(static::PROTOCOL);
     }
 
-    protected static function wrap(callable $callback, mixed ...$args): mixed {
-        stream_wrapper_unregister(static::PROTOCOL);
-        stream_wrapper_restore(static::PROTOCOL);
+    protected static function wrap(bool $unregister, callable $callback, mixed ...$args): mixed {
+        if ($unregister) {
+            stream_wrapper_unregister(static::PROTOCOL);
+            stream_wrapper_restore(static::PROTOCOL);
+        }
+        self::$lastErrorCode = null;
+        self::$lastErrorMessage = null;
+        set_error_handler(function(int $code, string $message, string $file, int $line) use (&$errorCode, &$errorMessage) {
+            self::$lastErrorCode = $errorCode;
+            self::$lastErrorMessage = $errorMessage;
+        });
+        $t = hrtime(true);
         $result = $callback(...$args);
-        stream_wrapper_unregister(static::PROTOCOL);
-        stream_wrapper_register(static::PROTOCOL, self::class);
+        $t = hrtime(true) - $t;
+        if ($t > 10000000) { // 1/100th of a second is considered blocking
+            // This call appears to be blocking
+            $bt = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 2);
+            array_shift($bt);
+            error_log("Moebius/FileStreamWrapper::".$bt[0]['function']." took ".($t/1000000)." ms and appears to block", 0);
+        }
+        restore_error_handler();
+        if ($unregister) {
+            stream_wrapper_unregister(static::PROTOCOL);
+            stream_wrapper_register(static::PROTOCOL, self::class);
+        }
         return $result;
     }
 
     protected $dirHandle = null;
 
     public function dir_closedir(): bool {
-        self::wrap(closedir(...), $this->dirHandle);
+        self::singleSuspend();
+        self::wrap(false, closedir(...), $this->dirHandle);
         return true;
     }
 
     public function dir_opendir(string $path, int $options=0): bool {
-        suspend();
-        return !!($this->dirHandle = self::wrap(opendir(...), $path));
+        self::singleSuspend();
+        return !!($this->dirHandle = @self::wrap(true, opendir(...), $path, $this->context));
     }
 
     public function dir_readdir(): string|false {
-        return self::wrap(readdir(...), $this->dirHandle);
+        return self::wrap(false, readdir(...), $this->dirHandle);
     }
 
     public function dir_rewinddir(): bool {
-        suspend();
-        return self::wrap(rewinddir(...), $this->dirHandle);
+        self::singleSuspend();
+        return self::wrap(false, rewinddir(...), $this->dirHandle);
     }
 
     public function mkdir(string $path, $mode, int $options=0): bool {
-        suspend();
-        return self::wrap(mkdir(...), $path, $mode, (bool) ($options & STREAM_MKDIR_RECURSIVE));
+        self::singleSuspend();
+        return self::wrap(true, mkdir(...), $path, $mode, (bool) ($options & STREAM_MKDIR_RECURSIVE));
     }
 
     public function rename(string $pathFrom, $pathTo): bool {
-        suspend();
-        return self::wrap(rename(...), $pathFrom, $pathTo);
+        self::singleSuspend();
+        return self::wrap(true, rename(...), $pathFrom, $pathTo);
     }
 
     public function rmdir(string $path): bool {
-        suspend();
-        return self::wrap(rmdir(...), $path);
+        self::singleSuspend();
+        return self::wrap(true, rmdir(...), $path);
     }
 
     public function stream_open(string $path, string $mode, int $options, ?string &$opened_path): bool {
-        return self::wrap(function() use ($path, $mode, $options, &$opened_path) {
+        return self::wrap(true, function() use ($path, $mode, $options, &$opened_path) {
             /**
              * Modify the mode so that we can open this file in a non-blocking manner
              */
             $isNonBlocking = strpos($mode, 'n') !== false;
-            $fp = fopen($path, $mode . ($isNonBlocking ? '' : 'n'), (bool) ($options & STREAM_USE_PATH));
+            $fp = @fopen($path, $mode . ($isNonBlocking ? '' : 'n'), (bool) ($options & STREAM_USE_PATH), $this->context);
             if (!$fp) {
+                self::suspend();
                 return false;
             }
 
@@ -91,28 +114,53 @@ class FileStreamWrapper extends Unblocker {
             $this->fp = $fp;
             $this->mode = $mode;
             $this->options = $options;
+            $this->path = $path;
 
-            // not actually sure that 'n' also gives a non-blocking stream or if it only applies to the fopen call
             $this->pretendNonBlocking = $isNonBlocking;
+
+            // We added 'n' to the mode string, but we'll call stream_set_blocking() as well
             stream_set_blocking($this->fp, false);
 
             if (!$isNonBlocking) {
-                readable($this->fp);
+                self::readable($this->fp);
             }
-
+            self::singleSuspend();
             return true;
         });
     }
 
+    public function stream_metadata(string $path, int $option, mixed $value): bool {
+        self::singleSuspend();
+        switch ($option) {
+            case STREAM_META_TOUCH:
+                $result = self::wrap(touch(...), $path, $value[0], $value[1]);
+                break;
+            case STREAM_META_OWNER_NAME:
+            case STREAM_META_OWNER:
+                $result = self::wrap(chown(...), $path, $value);
+                break;
+            case STREAM_META_GROUP_NAME:
+            case STREAM_META_GROUP:
+                $result = self::wrap(chgrp(...), $path, $value);
+                break;
+            case STREAM_META_ACCESS:
+                $result = self::wrap(chmod(...), $path, $value);
+                break;
+        }
+        throw new \Exception("stream_metadata not implemented");
+    }
+
     public function unlink(string $path): bool {
-        return self::wrap(unlink(...), $path);
+        self::singleSuspend();
+        return self::wrap(true, unlink(...), $path);
     }
 
     public function url_stat(string $path, $flags): array|false {
+        self::singleSuspend();
         if ($flags & STREAM_URL_STAT_LINK) {
-            return self::wrap(lstat(...), $path);
+            return self::wrap(true, lstat(...), $path);
         } else {
-            return self::wrap(stat(...), $path);
+            return self::wrap(true, stat(...), $path);
         }
     }
 }
