@@ -27,7 +27,6 @@ class FileStreamWrapper extends Unblocker {
     }
 
     protected static function wrap(callable $callback, mixed ...$args): mixed {
-        self::_interrupt();
         stream_wrapper_unregister(static::PROTOCOL);
         stream_wrapper_restore(static::PROTOCOL);
         $result = $callback(...$args);
