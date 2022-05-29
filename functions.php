@@ -4,6 +4,7 @@
 class_exists(Moebius\Loop\Readable::class);
 class_exists(Moebius\Loop\Writable::class);
 class_exists(Moebius\Loop\Timer::class);
+class_exists(Moebius\Promise::class);
 Moebius\Loop::await(new Moebius\Loop\Timer(0));
 Moebius\Coroutine::go(function() {
     Moebius\AsyncFile\FileStreamWrapper::register();
