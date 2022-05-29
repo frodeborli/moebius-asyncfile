@@ -12,7 +12,7 @@ class FileStreamWrapper extends Unblocker {
     protected static ?int $lastErrorCode = null;
     protected static ?string $lastErrorMessage = null;
 
-    public static function register(int $flags): void {
+    public static function register(): void {
         if (self::$registered) {
             throw new \Exception("Already registered");
         }
@@ -59,13 +59,13 @@ class FileStreamWrapper extends Unblocker {
     protected $dirHandle = null;
 
     public function dir_closedir(): bool {
-        self::singleSuspend();
+        $this->suspend();
         self::wrap(false, closedir(...), $this->dirHandle);
         return true;
     }
 
     public function dir_opendir(string $path, int $options=0): bool {
-        self::singleSuspend();
+        $this->suspend();
         return !!($this->dirHandle = @self::wrap(true, opendir(...), $path, $this->context));
     }
 
@@ -74,22 +74,22 @@ class FileStreamWrapper extends Unblocker {
     }
 
     public function dir_rewinddir(): bool {
-        self::singleSuspend();
+        $this->suspend();
         return self::wrap(false, rewinddir(...), $this->dirHandle);
     }
 
     public function mkdir(string $path, $mode, int $options=0): bool {
-        self::singleSuspend();
+        $this->suspend();
         return self::wrap(true, mkdir(...), $path, $mode, (bool) ($options & STREAM_MKDIR_RECURSIVE));
     }
 
     public function rename(string $pathFrom, $pathTo): bool {
-        self::singleSuspend();
+        $this->suspend();
         return self::wrap(true, rename(...), $pathFrom, $pathTo);
     }
 
     public function rmdir(string $path): bool {
-        self::singleSuspend();
+        $this->suspend();
         return self::wrap(true, rmdir(...), $path);
     }
 
@@ -101,7 +101,9 @@ class FileStreamWrapper extends Unblocker {
             $isNonBlocking = strpos($mode, 'n') !== false;
             $fp = @fopen($path, $mode . ($isNonBlocking ? '' : 'n'), (bool) ($options & STREAM_USE_PATH), $this->context);
             if (!$fp) {
-                self::suspend();
+                if (!$isPHP) {
+                    self::suspend();
+                }
                 return false;
             }
 
@@ -124,13 +126,13 @@ class FileStreamWrapper extends Unblocker {
             if (!$isNonBlocking) {
                 self::readable($this->fp);
             }
-            self::singleSuspend();
+            $this->suspend();
             return true;
         });
     }
 
     public function stream_metadata(string $path, int $option, mixed $value): bool {
-        self::singleSuspend();
+        $this->suspend();
         switch ($option) {
             case STREAM_META_TOUCH:
                 $result = self::wrap(touch(...), $path, $value[0], $value[1]);
@@ -151,12 +153,12 @@ class FileStreamWrapper extends Unblocker {
     }
 
     public function unlink(string $path): bool {
-        self::singleSuspend();
+        $this->suspend();
         return self::wrap(true, unlink(...), $path);
     }
 
     public function url_stat(string $path, $flags): array|false {
-        self::singleSuspend();
+        $this->suspend();
         if ($flags & STREAM_URL_STAT_LINK) {
             return self::wrap(true, lstat(...), $path);
         } else {
