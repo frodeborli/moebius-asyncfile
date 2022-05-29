@@ -29,6 +29,7 @@ class FileStreamWrapper extends Unblocker {
     }
 
     protected static function wrap(bool $unregister, callable $callback, mixed ...$args): mixed {
+        Co::suspend();
         if ($unregister) {
             stream_wrapper_unregister(static::PROTOCOL);
             stream_wrapper_restore(static::PROTOCOL);
@@ -59,13 +60,11 @@ class FileStreamWrapper extends Unblocker {
     protected $dirHandle = null;
 
     public function dir_closedir(): bool {
-        $this->suspend();
         self::wrap(false, closedir(...), $this->dirHandle);
         return true;
     }
 
     public function dir_opendir(string $path, int $options=0): bool {
-        $this->suspend();
         return !!($this->dirHandle = @self::wrap(true, opendir(...), $path, $this->context));
     }
 
@@ -74,22 +73,18 @@ class FileStreamWrapper extends Unblocker {
     }
 
     public function dir_rewinddir(): bool {
-        $this->suspend();
         return self::wrap(false, rewinddir(...), $this->dirHandle);
     }
 
     public function mkdir(string $path, $mode, int $options=0): bool {
-        $this->suspend();
         return self::wrap(true, mkdir(...), $path, $mode, (bool) ($options & STREAM_MKDIR_RECURSIVE));
     }
 
     public function rename(string $pathFrom, $pathTo): bool {
-        $this->suspend();
         return self::wrap(true, rename(...), $pathFrom, $pathTo);
     }
 
     public function rmdir(string $path): bool {
-        $this->suspend();
         return self::wrap(true, rmdir(...), $path);
     }
 
@@ -122,17 +117,17 @@ class FileStreamWrapper extends Unblocker {
 
             // We added 'n' to the mode string, but we'll call stream_set_blocking() as well
             stream_set_blocking($this->fp, false);
-
+/*
             if (!$isNonBlocking) {
                 self::readable($this->fp);
             }
             $this->suspend();
+*/
             return true;
         });
     }
 
     public function stream_metadata(string $path, int $option, mixed $value): bool {
-        $this->suspend();
         switch ($option) {
             case STREAM_META_TOUCH:
                 $result = self::wrap(touch(...), $path, $value[0], $value[1]);
@@ -153,12 +148,10 @@ class FileStreamWrapper extends Unblocker {
     }
 
     public function unlink(string $path): bool {
-        $this->suspend();
         return self::wrap(true, unlink(...), $path);
     }
 
     public function url_stat(string $path, $flags): array|false {
-        $this->suspend();
         if ($flags & STREAM_URL_STAT_LINK) {
             return self::wrap(true, lstat(...), $path);
         } else {
