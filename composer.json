@@ -18,9 +18,9 @@
             "email": "frode@ennerd.com"
         }
     ],
-    "minimum-stability": "RC",
+    "minimum-stability": "dev",
     "prefer-stable": true,
     "require": {
-        "moebius/coroutine": ">=1.0"
+        "moebius/coroutine": ">=1 <2"
     }
 }
