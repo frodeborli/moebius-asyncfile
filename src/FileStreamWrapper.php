@@ -51,11 +51,13 @@ class FileStreamWrapper {
         }
     }
 
+    private bool $bypass = false;
     private bool $blocking;
     private ?float $readTimeout = null;
     private ?float $writeTimeout = null;
     private $fp; // stream
     private $dh; // dirhandle
+
 
     public function stream_cast(int $cast_as) {
         $this->log(__METHOD__, func_get_args());
@@ -72,16 +74,33 @@ class FileStreamWrapper {
      */
     public function stream_open(string $path, string $mode, int $options, ?string $opened_path = null): bool {
         $this->log(__METHOD__, func_get_args());
-        //echo "stream_open($path, $mode)\n";
+
+        $t = hrtime(true);
+
+        $caller = \debug_backtrace(\DEBUG_BACKTRACE_IGNORE_ARGS, 2)[1]['function'] ?? null;
+        $this->bypass = 'include' === $caller || 'require' === $caller;
+
         $this->fp = self::wrap(function() use ($path, $mode, $options) {
             if (strpos($mode, 'n')===false) {
                 $this->blocking = true;
-                $mode .= 'n';
+                if (!$this->bypass) {
+                    $mode .= 'n';
+                }
             } else {
                 $this->blocking = false;
             }
+
             return \fopen($path, $mode, 0 === $options & \STREAM_USE_PATH, $this->context);
         });
+
+        if (!$this->bypass && $this->blocking) {
+            if (trim($mode, 'r') !== $mode || strpos($mode, '+') !== false) {
+                Co::readable($this->fp);
+            } elseif (trim($mode, 'w') !== $mode || strpos($mode, '+') !== false) {
+                Co::writable($this->fp);
+            }
+        }
+
 
         return !!$this->fp;
     }
@@ -140,11 +159,22 @@ class FileStreamWrapper {
 
     public function stream_read(int $count): string|false {
         $this->log(__METHOD__, func_get_args());
+        if ($this->bypass) {
+            return \fread($this->fp, $count);
+        }
         if ($this->blocking) {
+//echo "READING IN BLOCKING MODE=".json_encode($this->blocking)."\n";
+//$t = microtime(true);
             do {
+//echo "wait for readable\n";
                 $this->readable();
+//echo "did wait\n";
                 $chunk = \fread($this->fp, $count);
+
+
             } while ($chunk === '' && !feof($this->fp));
+//echo " - got chunk=".strlen($chunk)." in ".(microtime(true)-$t)."\n";
+//sleep(1);
             return $chunk;
         } else {
             $this->readable();
@@ -162,7 +192,11 @@ class FileStreamWrapper {
         switch ($option) {
             case STREAM_OPTION_BLOCKING:
                 // The method was called in response to stream_set_blocking()
-                $this->blocking = $arg1 !== 0;
+                if ($this->bypass) {
+                    \stream_set_blocking($this->fp, $arg1 !== 0);
+                } else {
+                    $this->blocking = $arg1 !== 0;
+                }
                 return true;
 
             case STREAM_OPTION_READ_TIMEOUT:
@@ -197,13 +231,17 @@ class FileStreamWrapper {
 
     public function stream_truncate(int $new_size): bool {
         $this->log(__METHOD__, func_get_args());
-        $this->writable();
+        if (!$this->bypass) {
+            $this->writable();
+        }
         return \ftruncate($this->fp, $new_size);
     }
 
     public function stream_write(string $data): int {
         $this->log(__METHOD__, func_get_args());
-        $this->writable();
+        if (!$this->bypass) {
+            $this->writable();
+        }
         return \fwrite($this->fp, $data);
     }
 
@@ -282,6 +320,10 @@ class FileStreamWrapper {
     }
 
     private function readable(): void {
+        if ($this->bypass) {
+throw new \Exception("Should have bypassed");
+            return;
+        }
         if (!Fiber::getCurrent()) {
             Loop::defer($again = function() use (&$done, &$again) {
                 if ($done) {
@@ -301,6 +343,10 @@ class FileStreamWrapper {
     }
 
     private function writable(): void {
+        if ($this->bypass) {
+throw new \Exception("Should have bypassed");
+            return;
+        }
         if (!Fiber::getCurrent()) {
             Loop::defer($again = function() use (&$done, &$again) {
                 if ($done) {
@@ -320,6 +366,10 @@ class FileStreamWrapper {
     }
 
     private static function suspend(): void {
+        if ($this->bypass) {
+throw new \Exception("Should have bypassed");
+            return;
+        }
         if (!Fiber::getCurrent()) {
             Loop::defer(Loop::stop(...));
             Loop::run();
@@ -329,7 +379,7 @@ class FileStreamWrapper {
     }
 
     private function log(string $method, array $args): void {
-        fwrite(STDOUT, $method."(".implode(", ", $args).")\n");
+//        fwrite(STDOUT, $method."(".implode(", ", $args).")\n");
     }
 
 }
