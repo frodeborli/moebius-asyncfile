@@ -7,29 +7,26 @@ use Moebius\Coroutine as Co;
 use Moebius\Coroutine\Unblocker;
 use Moebius\Loop;
 
+/*
 class_exists(Unblocker::class) or die("not found");
 class_exists(\Moebius\Loop\Readable::class);
-
+*/
 use const STREAM_REPORT_ERRORS;
 
 class FileStreamWrapper {
 
+    private static bool $active = false;
+
     private static bool $registered = false;
-    private static bool $ready = false;
 
     public static function register(): void {
-        if (!self::$ready) {
-            $fp = \fopen(__FILE__, 'r');
-            $fp2 = Unblocker::unblock($fp);
-            \stream_get_contents($fp2);
-            self::$ready = true;
-        }
         if (self::$registered) {
             throw new \LogicException("Already registered");
         }
         self::$registered = true;
         \stream_wrapper_unregister('file');
         \stream_wrapper_register('file', self::class);
+//echo "registered\n";
     }
 
     public static function unregister(): void {
@@ -39,6 +36,7 @@ class FileStreamWrapper {
         self::$registered = false;
         \stream_wrapper_unregister('file');
         \stream_wrapper_restore('file');
+//echo "unregistered\n";
     }
 
     private static function wrap(Closure $callable) {
@@ -46,7 +44,7 @@ class FileStreamWrapper {
         try {
             return $callable();
         } catch (\Throwable $e) {
-            echo get_class($e).": ".$e->getMessage()."\n".$e->getTraceAsString()."\n";
+            //echo get_class($e).": ".$e->getMessage()."\n".$e->getTraceAsString()."\n";
             throw $e;
         } finally {
             self::register();
@@ -60,6 +58,7 @@ class FileStreamWrapper {
     private $dh; // dirhandle
 
     public function stream_cast(int $cast_as) {
+        $this->log(__METHOD__, func_get_args());
         return $this->fp;
     }
 
@@ -71,8 +70,8 @@ class FileStreamWrapper {
      * @param int         $options     options for opening
      * @param string|null $opened_path full path that was actually opened
      */
-    public function stream_open(string $path, string $mode, int $options, ?string $opened_path = null): bool
-    {
+    public function stream_open(string $path, string $mode, int $options, ?string $opened_path = null): bool {
+        $this->log(__METHOD__, func_get_args());
         //echo "stream_open($path, $mode)\n";
         $this->fp = self::wrap(function() use ($path, $mode, $options) {
             if (strpos($mode, 'n')===false) {
@@ -88,23 +87,28 @@ class FileStreamWrapper {
     }
 
     public function stream_close(): void {
+        $this->log(__METHOD__, func_get_args());
         \fclose($this->fp);
     }
 
     public function stream_eof(): bool {
+        $this->log(__METHOD__, func_get_args());
         return \feof($this->fp);
     }
 
     public function stream_flush(): bool {
+        $this->log(__METHOD__, func_get_args());
         $this->writable();
         return \fflush($this->fp);
     }
 
     public function stream_flock(int $operation): bool {
+        $this->log(__METHOD__, func_get_args());
         return flock($this->fp, $operation, $would_block);
     }
 
     public function stream_metadata(string $path, int $option, $value): bool {
+        $this->log(__METHOD__, func_get_args());
         return self::wrap(function() use ($path, $options, $value) {
             switch ($options) {
                 case STREAM_META_TOUCH:
@@ -135,11 +139,12 @@ class FileStreamWrapper {
     }
 
     public function stream_read(int $count): string|false {
+        $this->log(__METHOD__, func_get_args());
         if ($this->blocking) {
             do {
                 $this->readable();
                 $chunk = \fread($this->fp, $count);
-            } while ($chunk === '');
+            } while ($chunk === '' && !feof($this->fp));
             return $chunk;
         } else {
             $this->readable();
@@ -148,10 +153,12 @@ class FileStreamWrapper {
     }
 
     public function stream_seek(int $offset, int $whence=SEEK_SET): bool {
+        $this->log(__METHOD__, func_get_args());
         return 0 === \fseek($this->fp, $offset, $whence);
     }
 
-    public function stream_set_option(int $option, int $arg1, int $arg2): bool {
+    public function stream_set_option(int $option, ?int $arg1, ?int $arg2): bool {
+        $this->log(__METHOD__, func_get_args());
         switch ($option) {
             case STREAM_OPTION_BLOCKING:
                 // The method was called in response to stream_set_blocking()
@@ -179,68 +186,82 @@ class FileStreamWrapper {
     }
 
     public function stream_stat(): array|false {
+        $this->log(__METHOD__, func_get_args());
         return \fstat($this->fp);
     }
 
     public function stream_tell(): int {
+        $this->log(__METHOD__, func_get_args());
         return \ftell($this->fp);
     }
 
     public function stream_truncate(int $new_size): bool {
-$this->writable();
+        $this->log(__METHOD__, func_get_args());
+        $this->writable();
         return \ftruncate($this->fp, $new_size);
     }
 
     public function stream_write(string $data): int {
-$this->writable();
+        $this->log(__METHOD__, func_get_args());
+        $this->writable();
         return \fwrite($this->fp, $data);
     }
 
     public function dir_closedir(): bool {
+        $this->log(__METHOD__, func_get_args());
         \closedir($this->dh);
+        return !!$this->dh;
     }
 
     public function dir_opendir(string $path, int $options=0): bool {
-        return static::wrap(function() use ($path, $options) {
-            $this->dh = \opendir($path, $options);
-            return !!$this->dh;
+        $this->log(__METHOD__, func_get_args());
+        static::wrap(function() use ($path) {
+            $this->dh = \opendir($path, $this->context);
         });
+        return !!$this->dh;
     }
 
     public function dir_readdir(): string|false {
+        $this->log(__METHOD__, func_get_args());
         return \readdir($this->dh);
     }
 
     public function dir_rewinddir(): bool {
+        $this->log(__METHOD__, func_get_args());
         \rewinddir($this->dh);
         return true;
     }
 
     public function mkdir(string $path, int $mode, int $options): bool {
+        $this->log(__METHOD__, func_get_args());
         return static::wrap(function() use ($path, $mode, $options) {
             return \mkdir($path, $mode, 0 !== $options & \STREAM_MKDIR_RECURSIVE, $this->context);
         });
     }
 
     public function rename(string $path_from, string $path_to): bool {
+        $this->log(__METHOD__, func_get_args());
         return static::wrap(function() use ($path_from, $path_to) {
             return \rename($path_from, $path_to, $this->context);
         });
     }
 
     public function rmdir(string $path, int $options): bool {
+        $this->log(__METHOD__, func_get_args());
         return static::wrap(function() use ($path, $options) {
             return \rmdir($path, $this->context);
         });
     }
 
     public function unlink(string $path): bool {
+        $this->log(__METHOD__, func_get_args());
         return static::wrap(function() use ($path) {
             return \unlink($path, $this->context);
         });
     }
 
     public function url_stat(string $path, int $flags): array|false {
+        $this->log(__METHOD__, func_get_args());
         if ($flags & STREAM_URL_STAT_LINK) {
             return static::wrap(function() use ($path, $flags) {
                 if ($flags & \STREAM_URL_STAT_QUIET) {
@@ -262,12 +283,17 @@ $this->writable();
 
     private function readable(): void {
         if (!Fiber::getCurrent()) {
-            //echo "blocking readable\n";
-            do {
-                $reads = [ $this->fp ];
-                $void = [];
-                $count = \stream_select($reads, $void, $void, 1, 0);
-            } while ($count !== 1);
+            Loop::defer($again = function() use (&$done, &$again) {
+                if ($done) {
+                    Loop::stop();
+                } else {
+                    Loop::defer($again);
+                }
+            });
+            Loop::readable($this->fp, function() use (&$done) {
+                $done = true;
+            });
+            Loop::run();
         } else {
             //echo "async readable\n";
             Co::readable($this->fp);
@@ -276,12 +302,17 @@ $this->writable();
 
     private function writable(): void {
         if (!Fiber::getCurrent()) {
-            //echo "blocking writable\n";
-            do {
-                $writes = [ $this->fp ];
-                $void = [];
-                $count = \stream_select($void, $reads, $void, 1, 0);
-            } while ($count !== 1);
+            Loop::defer($again = function() use (&$done, &$again) {
+                if ($done) {
+                    Loop::stop();
+                } else {
+                    Loop::defer($again);
+                }
+            });
+            Loop::writable($this->fp, function() use (&$done) {
+                $done = true;
+            });
+            Loop::run();
         } else {
             //echo "async writable\n";
             Co::writable($this->fp);
@@ -289,9 +320,16 @@ $this->writable();
     }
 
     private static function suspend(): void {
-        if (Fiber::getCurrent()) {
+        if (!Fiber::getCurrent()) {
+            Loop::defer(Loop::stop(...));
+            Loop::run();
+        } else {
             Co::suspend();
         }
+    }
+
+    private function log(string $method, array $args): void {
+        fwrite(STDOUT, $method."(".implode(", ", $args).")\n");
     }
 
 }

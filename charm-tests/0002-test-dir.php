@@ -1,19 +1,15 @@
 <?php
-require(__DIR__.'/../vendor/autoload.php');
-
-use function M\{go, await, suspend};
-
-go(function() {
+Moebius\Coroutine::go(function() {
     echo "First\n";
-    suspend();
+    Moebius\Coroutine::suspend();
     echo "Second\n";
-    suspend();
+    Moebius\Coroutine::suspend();
     echo "Third\n";
-    suspend();
+    Moebius\Coroutine::suspend();
     echo "Forth\n";
-    suspend();
+    Moebius\Coroutine::suspend();
     echo "Fifth\n";
-    suspend();
+    Moebius\Coroutine::suspend();
     echo "Sixth\n";
 });
 clearstatcache();
