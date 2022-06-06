@@ -3,7 +3,7 @@
     "description": "Transparent context switching for moebius coroutines on file system access.",
     "type": "library",
     "require-dev": {
-        "charm/testing": "dev-master"
+        "charm/testing": ">=1 <2"
     },
     "license": "MIT",
     "autoload": {
