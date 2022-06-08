@@ -21,6 +21,10 @@
     "minimum-stability": "dev",
     "prefer-stable": true,
     "require": {
-        "moebius/coroutine": ">=1.0.100"
+        "moebius/coroutine": ">=1.0.100",
+        "moebius/common": ">=1.0"
+    },
+    "scripts": {
+        "test": "./vendor/bin/charm-testing"
     }
 }
